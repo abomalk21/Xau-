@@ -12,7 +12,6 @@ ny_tz = pytz.timezone('America/New_York')
 @st.cache_data(ttl=60)
 def get_xau_data():
     try:
-        # جلب بيانات يومين لضمان ظهور الجلسات السابقة
         data = yf.download("GC=F DX-Y", period="2d", interval="15m", progress=False, auto_adjust=True)
         if data.empty: return None, None
         gold = data.xs('GC=F', axis=1, level=1)
@@ -28,55 +27,58 @@ if g_df is not None and len(g_df) > 2:
     latest_g = float(g_df['Close'].iloc[-1])
     now_ny = datetime.now(ny_tz)
     
-    # 1. حساب Midnight Open بدقة
+    # 1. حساب Midnight Open
     mid_df = g_df[g_df.index.date == now_ny.date()].between_time('00:00', '00:15')
     mn_open = float(mid_df['Open'].iloc[0]) if not mid_df.empty else float(g_df['Open'].iloc[0])
 
-    # 2. حساب مستويات الجلسات السابقة
-    asia = g_df.between_time("20:00", "00:00").tail(16)
-    london = g_df.between_time("02:00", "05:00").tail(12)
+    # 2. حساب قمة وقاع آسيا ولندن (أمس واليوم)
+    asia = g_df.between_time("20:00", "00:00")
+    london = g_df.between_time("02:00", "05:00")
+    
     ah, al = (asia['High'].max(), asia['Low'].min()) if not asia.empty else (0, 0)
     lh, ll = (london['High'].max(), london['Low'].min()) if not london.empty else (0, 0)
 
-    # عرض العدادات العلوية
+    # عرض البيانات العلوية
     c1, c2, c3 = st.columns(3)
     c1.metric("💰 Gold", f"{latest_g:.2f}")
     c2.metric("🎯 Midnight", f"{mn_open:.2f}")
     c3.metric("🇺🇸 NY Time", now_ny.strftime("%H:%M"))
 
-    # تحليل Judas Swing والتحذيرات النصية
-    st.markdown("### 🛡️ Smart Monitor")
-    checks = []
-    g_change = g_df['Close'].iloc[-1] - g_df['Close'].iloc[-4]
-    d_change = d_df['Close'].iloc[-1] - d_df['Close'].iloc[-4]
-    if g_change > 0 and d_change > 0: checks.append("⚠️ SMT: الذهب والدولار يصعدان معاً")
+    # الشارت المطور مع ميزة التصغير التلقائي
+    # عرض آخر 100 شمعة بدلاً من 50 لرؤية أوسع
+    plot_df = g_df.tail(100) 
     
-    if lh > 0 and latest_g > lh and latest_g > mn_open:
-        checks.append("🔍 Judas Swing: سحب سيولة قمة لندن فوق خط MN (توقع هبوط)")
-    elif ll > 0 and latest_g < ll and latest_g < mn_open:
-        checks.append("🔍 Judas Swing: سحب سيولة قاع لندن تحت خط MN (توقع صعود)")
-
-    if checks:
-        for c in checks: st.warning(c)
-    else: st.info("✅ الهيكل متناغم حالياً")
-
-    # رسم الشارت مع تعديل خط منتصف الليل
     fig = go.Figure(data=[go.Candlestick(
-        x=g_df.index[-50:], open=g_df['Open'][-50:], 
-        high=g_df['High'][-50:], low=g_df['Low'][-50:], 
-        close=g_df['Close'][-50:], name="XAU")])
+        x=plot_df.index, open=plot_df['Open'], 
+        high=plot_df['High'], low=plot_df['Low'], 
+        close=plot_df['Close'], name="XAU")])
 
-    # --- تعديل خط منتصف الليل ليصبح أحمر متصل ---
-    fig.add_hline(y=mn_open, line_color="red", line_width=2, annotation_text="Midnight Open", annotation_font_color="red")
+    # إضافة الخطوط بالألوان والأسماء
+    fig.add_hline(y=mn_open, line_color="red", line_width=2, annotation_text="Midnight")
     
-    # خطوط لندن (صفراء)
-    if lh > 0: fig.add_hline(y=lh, line_color="yellow", line_dash="dot", line_width=1, annotation_text="London H")
-    if ll > 0: fig.add_hline(y=ll, line_color="yellow", line_dash="dot", line_width=1, annotation_text="London L")
+    if ah > 0: # إضافة خط آسيا باللون الأزرق لتمييزه
+        fig.add_hline(y=ah, line_color="cyan", line_dash="dash", annotation_text="Asia High")
+        fig.add_hline(y=al, line_color="cyan", line_dash="dash", annotation_text="Asia Low")
     
-    fig.update_layout(template="plotly_dark", height=500, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    if lh > 0: # خطوط لندن باللون الأصفر
+        fig.add_hline(y=lh, line_color="yellow", line_dash="dot", annotation_text="London High")
+        fig.add_hline(y=ll, line_color="yellow", line_dash="dot", annotation_text="London Low")
 
-    st.write(f"🌏 Asia: H {ah:.2f} | L {al:.2f}  ---  🇬🇧 London: H {lh:.2f} | L {ll:.2f}")
+    # إعدادات التحكم بالشارت (لحل مشكلة التصغير في التابلت)
+    fig.update_layout(
+        template="plotly_dark",
+        height=600,
+        margin=dict(l=0,r=0,t=0,b=0),
+        xaxis_rangeslider_visible=False,
+        # إضافة أزرار التصغير والتكبير التلقائي
+        modebar_add=['zoomIn2d', 'zoomOut2d', 'pan2d', 'autoScale2d'] 
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
+
+    # تفاصيل السيولة أسفل الشارت
+    st.write(f"🌏 **Asia:** High {ah:.2f} | Low {al:.2f}")
+    st.write(f"🇬🇧 **London:** High {lh:.2f} | Low {ll:.2f}")
 
 else:
     st.info("جاري تحديث البيانات...")
