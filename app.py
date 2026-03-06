@@ -5,9 +5,12 @@ import pytz
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
-# --- إعدادات الواجهة ---
-st.set_page_config(page_title="XAU", layout="wide")
+# --- إعدادات المناطق الزمنية ---
 ny_tz = pytz.timezone('America/New_York')
+bg_tz = pytz.timezone('Asia/Baghdad')
+ldn_tz = pytz.timezone('Europe/London')
+
+st.set_page_config(page_title="XAU", layout="wide")
 
 @st.cache_data(ttl=60)
 def get_xau_data():
@@ -26,13 +29,13 @@ g_df, d_df = get_xau_data()
 if g_df is not None and len(g_df) > 2:
     latest_g = float(g_df['Close'].iloc[-1])
     now_ny = datetime.now(ny_tz)
+    now_bg = datetime.now(bg_tz)
+    now_ldn = datetime.now(ldn_tz)
     
-    # 1. عداد وقت الشمعة بدقة ثانية
-    current_min = now_ny.minute
-    rem_min = 14 - (current_min % 15)
+    # العدادات العلوية
+    rem_min = 14 - (now_ny.minute % 15)
     rem_sec = 59 - now_ny.second
     
-    # 2. عداد السلفر بوليت القادم
     sb_windows = [3, 10, 14] 
     next_sb = None
     for h in sb_windows:
@@ -42,19 +45,20 @@ if g_df is not None and len(g_df) > 2:
             break
     if not next_sb:
         next_sb = (now_ny + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
-    
     diff_sb = next_sb - now_ny
     sb_h, sb_m = divmod(diff_sb.seconds // 60, 60)
 
-    # 3. حساب المستويات
+    # حساب المستويات
     mid_df = g_df[g_df.index.date == now_ny.date()].between_time('00:00', '00:15')
     mn_open = float(mid_df['Open'].iloc[0]) if not mid_df.empty else float(g_df['Open'].iloc[0])
+    
     asia = g_df.between_time("20:00", "00:00")
-    london = g_df.between_time("02:00", "05:00")
     ah, al = (asia['High'].max(), asia['Low'].min()) if not asia.empty else (0, 0)
+    
+    london = g_df.between_time("02:00", "05:00")
     lh, ll = (london['High'].max(), london['Low'].min()) if not london.empty else (0, 0)
 
-    # المربعات العلوية المحدثة
+    # عرض البيانات
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("💰 Gold", f"{latest_g:.2f}")
     c2.metric("🎯 Midnight", f"{mn_open:.2f}")
@@ -67,32 +71,28 @@ if g_df is not None and len(g_df) > 2:
         x=plot_df.index, open=plot_df['Open'], high=plot_df['High'],
         low=plot_df['Low'], close=plot_df['Close'], name="XAU")])
 
-    # خطوط السيولة (تصميم موحد منقط)
+    # خط منتصف الليل (أحمر)
     fig.add_hline(y=mn_open, line_color="red", line_width=3, annotation_text="MIDNIGHT")
+    
+    # --- توحيد لون وتنسيق آسيا مع لندن (أصفر منقط) ---
     if ah > 0:
-        fig.add_hline(y=ah, line_color="#00FFFF", line_width=2, line_dash="dot", annotation_text="ASIA H")
-        fig.add_hline(y=al, line_color="#00FFFF", line_width=2, line_dash="dot", annotation_text="ASIA L")
+        fig.add_hline(y=ah, line_color="yellow", line_width=2, line_dash="dot", annotation_text="ASIA H")
+        fig.add_hline(y=al, line_color="yellow", line_width=2, line_dash="dot", annotation_text="ASIA L")
+    
     if lh > 0:
         fig.add_hline(y=lh, line_color="yellow", line_width=2, line_dash="dot", annotation_text="LONDON H")
         fig.add_hline(y=ll, line_color="yellow", line_width=2, line_dash="dot", annotation_text="LONDON L")
 
-    # إعدادات الواجهة النهائية
-    fig.update_layout(
-        template="plotly_dark", height=750, margin=dict(l=0,r=0,t=0,b=0),
-        xaxis_rangeslider_visible=False,
-        modebar=dict(bgcolor='black', color='white', activecolor='#00FFFF')
-    )
+    fig.update_layout(template="plotly_dark", height=750, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
     
-    # تكبير عملي للأزرار عبر تقليل عددها
-    st.plotly_chart(fig, use_container_width=True, config={
-        'scrollZoom': True, 
-        'displayModeBar': True,
-        'displaylogo': False,
-        'modeBarButtonsToRemove': ['lasso2d', 'select2d', 'hoverClosestCartesian', 'hoverCompareCartesian'],
-        'modeBarButtonsToAdd': ['zoomIn2d', 'zoomOut2d', 'autoScale2d']
-    })
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
 
-    st.write(f"🌏 **Asia:** {al:.2f}-{ah:.2f} | 🇬🇧 **London:** {ll:.2f}-{lh:.2f}")
+    # شريط المعلومات السفلي مع مواقيت بغداد ولندن
+    st.markdown(f"""
+    🕒 **Time:** 🇮🇶 Baghdad: `{now_bg.strftime('%H:%M')}` | 🇬🇧 London: `{now_ldn.strftime('%H:%M')}` | 🇺🇸 NY: `{now_ny.strftime('%H:%M')}`
+    
+    🌏 **Asia Range:** `{al:.2f} - {ah:.2f}` | 🇬🇧 **London Range:** `{ll:.2f} - {lh:.2f}`
+    """)
 
 else:
     st.info("جاري التحديث...")
