@@ -5,79 +5,96 @@ import pytz
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 
-# --- إعدادات الوقت الأساسية ---
+# --- إعدادات المناطق الزمنية ---
 ny_tz = pytz.timezone('America/New_York')
 bg_tz = pytz.timezone('Asia/Baghdad')
+ldn_tz = pytz.timezone('Europe/London')
 
 st.set_page_config(page_title="XAU", layout="wide")
 
-@st.cache_data(ttl=15) # تحديث سريع جداً
-def get_xau():
+@st.cache_data(ttl=60)
+def get_xau_data():
     try:
-        # استخدام الرمز المباشر للذهب الفوري لضمان البيانات
-        df = yf.download("GC=F", period="2d", interval="15m", progress=False)
-        if df.empty: return None
-        df.index = df.index.tz_convert(ny_tz)
-        return df.dropna()
-    except: return None
+        data = yf.download("GC=F DX-Y", period="2d", interval="15m", progress=False, auto_adjust=True)
+        if data.empty: return None, None
+        gold = data.xs('GC=F', axis=1, level=1)
+        dxy = data.xs('DX-Y', axis=1, level=1)
+        gold.index = gold.index.tz_convert(ny_tz)
+        return gold, dxy
+    except: return None, None
 
 st.title("🏆 XAU")
-data = get_xau()
+g_df, d_df = get_xau_data()
 
-if data is not None and not data.empty:
+if g_df is not None and len(g_df) > 2:
+    latest_g = float(g_df['Close'].iloc[-1])
     now_ny = datetime.now(ny_tz)
+    now_bg = datetime.now(bg_tz)
+    now_ldn = datetime.now(ldn_tz)
     
-    # 1. المربعات العلوية
-    last_price = float(data['Close'].iloc[-1])
-    mn_price = float(data.between_time('00:00', '00:15')['Open'].iloc[0]) if not data.between_time('00:00', '00:15').empty else float(data['Open'].iloc[0])
+    # العدادات العلوية
+    rem_min = 14 - (now_ny.minute % 15)
+    rem_sec = 59 - now_ny.second
     
+    sb_windows = [3, 10, 14] 
+    next_sb = None
+    for h in sb_windows:
+        target = now_ny.replace(hour=h, minute=0, second=0, microsecond=0)
+        if target > now_ny:
+            next_sb = target
+            break
+    if not next_sb:
+        next_sb = (now_ny + timedelta(days=1)).replace(hour=3, minute=0, second=0, microsecond=0)
+    diff_sb = next_sb - now_ny
+    sb_h, sb_m = divmod(diff_sb.seconds // 60, 60)
+
+    # حساب المستويات
+    mid_df = g_df[g_df.index.date == now_ny.date()].between_time('00:00', '00:15')
+    mn_open = float(mid_df['Open'].iloc[0]) if not mid_df.empty else float(g_df['Open'].iloc[0])
+    
+    asia = g_df.between_time("20:00", "00:00")
+    ah, al = (asia['High'].max(), asia['Low'].min()) if not asia.empty else (0, 0)
+    
+    london = g_df.between_time("02:00", "05:00")
+    lh, ll = (london['High'].max(), london['Low'].min()) if not london.empty else (0, 0)
+
+    # عرض البيانات
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("💰 Gold", f"{last_price:.2f}")
-    c2.metric("🎯 Midnight", f"{mn_price:.2f}")
-    c3.metric("⏳ Bar Ends", f"{14 - (now_ny.minute % 15):02d}:{59 - now_ny.second:02d}")
-    
-    sb_target = next((now_ny.replace(hour=h, minute=0, second=0) for h in [3, 10, 14] if now_ny.replace(hour=h, minute=0, second=0) > now_ny), now_ny.replace(hour=3, minute=0, second=0) + timedelta(days=1))
-    c4.metric("🏹 Next SB", f"{(sb_target - now_ny).seconds // 3600:02d}h {((sb_target - now_ny).seconds // 60) % 60:02d}m")
+    c1.metric("💰 Gold", f"{latest_g:.2f}")
+    c2.metric("🎯 Midnight", f"{mn_open:.2f}")
+    c3.metric("⏳ Bar Ends", f"{rem_min:02d}:{rem_sec:02d}")
+    c4.metric("🏹 Next SB", f"{sb_h:02d}h {sb_m:02d}m")
 
-    # 2. الشارت (إجبار المحور Y على السعر الحالي)
-    plot_df = data.tail(80) # تقليل عدد الشموع لزيادة الوضوح
-    
+    # الشارت
+    plot_df = g_df.tail(120) 
     fig = go.Figure(data=[go.Candlestick(
-        x=plot_df.index,
-        open=plot_df['Open'], high=plot_df['High'],
-        low=plot_df['Low'], close=plot_df['Close'],
-        increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
-    )])
+        x=plot_df.index, open=plot_df['Open'], high=plot_df['High'],
+        low=plot_df['Low'], close=plot_df['Close'], name="XAU")])
 
-    # إضافة خطوط الجلسات (أصفر منقط)
-    for s, e, n in [("20:00", "00:00", "ASIA"), ("02:00", "05:00", "LONDON")]:
-        sess = data.between_time(s, e)
-        if not sess.empty:
-            fig.add_hline(y=float(sess['High'].max()), line_color="yellow", line_dash="dot", annotation_text=f"{n} H")
-            fig.add_hline(y=float(sess['Low'].min()), line_color="yellow", line_dash="dot", annotation_text=f"{n} L")
+    # خط منتصف الليل (أحمر)
+    fig.add_hline(y=mn_open, line_color="red", line_width=3, annotation_text="MIDNIGHT")
+    
+    # --- توحيد لون وتنسيق آسيا مع لندن (أصفر منقط) ---
+    if ah > 0:
+        fig.add_hline(y=ah, line_color="yellow", line_width=2, line_dash="dot", annotation_text="ASIA H")
+        fig.add_hline(y=al, line_color="yellow", line_width=2, line_dash="dot", annotation_text="ASIA L")
+    
+    if lh > 0:
+        fig.add_hline(y=lh, line_color="yellow", line_width=2, line_dash="dot", annotation_text="LONDON H")
+        fig.add_hline(y=ll, line_color="yellow", line_width=2, line_dash="dot", annotation_text="LONDON L")
 
-    fig.add_hline(y=mn_price, line_color="red", line_width=2, annotation_text="MIDNIGHT")
+    fig.update_layout(template="plotly_dark", height=750, margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
+    
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
 
-    # إعدادات إظهار الشموع الإجباري
-    fig.update_layout(
-        template="plotly_dark", height=700, margin=dict(l=0,r=50,t=0,b=0),
-        xaxis_rangeslider_visible=False,
-        yaxis=dict(
-            autorange=True, # جعل المحور يتحرك مع السعر تلقائياً
-            fixedrange=False,
-            side="right",
-            gridcolor="#333333"
-        )
-    )
-
-    # تفعيل أزرار التحكم بالكامل
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
-
-    # 3. شريط الأخبار والمواقيت بالأسفل تماماً
-    st.markdown("---")
-    st.error("🚨 **Friday High Volatility Alert:** NFP/Jobs Report at 08:30 AM NY Time.")
-    st.markdown(f"🕒 **Baghdad:** `{datetime.now(bg_tz).strftime('%H:%M')}` | 🇺🇸 **New York:** `{now_ny.strftime('%H:%M')}`")
+    # شريط المعلومات السفلي مع مواقيت بغداد ولندن
+    st.markdown(f"""
+    🕒 **Time:** 🇮🇶 Baghdad: `{now_bg.strftime('%H:%M')}` | 🇬🇧 London: `{now_ldn.strftime('%H:%M')}` | 🇺🇸 NY: `{now_ny.strftime('%H:%M')}`
+    
+    🌏 **Asia Range:** `{al:.2f} - {ah:.2f}` | 🇬🇧 **London Range:** `{ll:.2f} - {lh:.2f}`
+    """)
 
 else:
-    st.warning("⚠️ لا توجد بيانات حالياً. يرجى الضغط على الزر أدناه لتنشيط الاتصال.")
-    if st.button('🚀 Force Reset Connection'): st.rerun()
+    st.info("جاري التحديث...")
+
+if st.button('🔄 Update Now'): st.rerun()
