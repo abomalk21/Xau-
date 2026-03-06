@@ -12,10 +12,9 @@ ldn_tz = pytz.timezone('Europe/London')
 
 st.set_page_config(page_title="XAU", layout="wide")
 
-@st.cache_data(ttl=30)
-def get_gold_data():
+@st.cache_data(ttl=20) # تقليل وقت الكاش لضمان تحديث السعر
+def get_gold_fast():
     try:
-        # جلب بيانات الذهب فقط لضمان السرعة القصوى
         g = yf.download("GC=F", period="2d", interval="15m", progress=False)
         if g.empty: return None
         g.index = g.index.tz_convert(ny_tz)
@@ -23,12 +22,11 @@ def get_gold_data():
     except: return None
 
 st.title("🏆 XAU") 
-g_df = get_gold_data()
+g_df = get_gold_fast()
 
 if g_df is not None and not g_df.empty:
     now_ny = datetime.now(ny_tz)
     now_bg = datetime.now(bg_tz)
-    now_ldn = datetime.now(ldn_tz)
     
     # 1. المربعات العلوية
     latest_price = float(g_df['Close'].iloc[-1])
@@ -44,7 +42,7 @@ if g_df is not None and not g_df.empty:
     sb_diff = sb_target - now_ny
     c4.metric("🏹 Next SB", f"{sb_diff.seconds // 3600:02d}h {(sb_diff.seconds // 60) % 60:02d}m")
 
-    # 2. الشارت (إصلاح ظهور الشموع وأدوات التحكم)
+    # 2. الشارت مع إصلاح جذري للمحور (Y-Axis Fix)
     plot_df = g_df.tail(100)
     fig = go.Figure(data=[go.Candlestick(
         x=plot_df.index,
@@ -52,10 +50,10 @@ if g_df is not None and not g_df.empty:
         high=plot_df['High'],
         low=plot_df['Low'],
         close=plot_df['Close'],
-        name="XAU"
+        name="Gold"
     )])
     
-    # توحيد مستويات آسيا ولندن (أصفر منقط)
+    # إضافة المستويات (أصفر منقط)
     for s_start, s_end, s_name in [("20:00", "00:00", "ASIA"), ("02:00", "05:00", "LONDON")]:
         sess = g_df.between_time(s_start, s_end)
         if not sess.empty:
@@ -64,25 +62,24 @@ if g_df is not None and not g_df.empty:
     
     fig.add_hline(y=mn_price, line_color="red", line_width=2, annotation_text="MIDNIGHT")
     
-    # تفعيل شريط التحكم (displayModeBar=True) وإصلاح المحاور لظهور الشموع
+    # الإعدادات لضمان الرؤية (أهم جزء)
     fig.update_layout(
         template="plotly_dark", 
-        height=750, 
+        height=700, 
         margin=dict(l=10, r=10, t=10, b=10),
         xaxis_rangeslider_visible=False,
-        yaxis=dict(autorange=True, fixedrange=False) # لضمان ظهور الشموع وعدم اختفائها
+        # هذا السطر يجعل الشارت يركز على الشموع الحالية تلقائياً
+        yaxis=dict(fixedrange=False, autorange=True) 
     )
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
-    # 3. شريط الأخبار والمواقيت بالأسفل
+    # 3. شريط الأخبار والمواقيت بالأسفل كما طلبت
     st.markdown("---")
-    st.info(f"📅 **Friday Alert:** High Volatility. Watch for NFP/Jobs Report (08:30 AM NY Time).")
-    st.markdown(f"""
-    🕒 **Time Engine:** 🇮🇶 Baghdad: `{now_bg.strftime('%H:%M')}` | 🇬🇧 London: `{now_ldn.strftime('%H:%M')}` | 🇺🇸 NY: `{now_ny.strftime('%H:%M')}`
-    """)
+    st.warning(f"⚠️ **Friday Alert:** High Volatility Sessions. Watch for News (08:30 AM NY).")
+    st.markdown(f"🕒 **Time:** 🇮🇶 Baghdad: `{now_bg.strftime('%H:%M')}` | 🇺🇸 NY: `{now_ny.strftime('%H:%M')}`")
 
 else:
-    st.info("🔄 Syncing Data...")
+    st.info("🔄 جاري مزامنة الشموع...")
 
-if st.button('🔄 Refresh'): st.rerun()
+if st.button('🔄 Update Now'): st.rerun()
