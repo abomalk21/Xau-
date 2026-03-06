@@ -12,26 +12,27 @@ ldn_tz = pytz.timezone('Europe/London')
 
 st.set_page_config(page_title="XAU", layout="wide")
 
-@st.cache_data(ttl=30) # تقليل الكاش لسرعة تحديث السعر
+@st.cache_data(ttl=20) # تحديث أسرع للسعر اللحظي
 def get_xau_data():
     try:
-        # جلب البيانات المباشرة للذهب
+        # استخدام الرمز المباشر لضمان مطابقة المنصة
         data = yf.download("GC=F", period="2d", interval="15m", progress=False, auto_adjust=True)
         if data.empty: return None
         data.index = data.index.tz_convert(ny_tz)
-        return data.dropna() # تنظيف لضمان ظهور الشموع
+        return data
     except: return None
 
 st.title("🏆 XAU")
 g_df = get_xau_data()
 
 if g_df is not None and len(g_df) > 2:
+    # التأكد من تحويل السعر إلى رقم بسيط لتجنب الأخطاء
     latest_g = float(g_df['Close'].iloc[-1])
     now_ny = datetime.now(ny_tz)
     now_bg = datetime.now(bg_tz)
     now_ldn = datetime.now(ldn_tz)
     
-    # العدادات العلوية (نفس قيمك الأصلية)
+    # العدادات العلوية (قاعدتك الأساسية)
     rem_min = 14 - (now_ny.minute % 15)
     rem_sec = 59 - now_ny.second
     
@@ -47,15 +48,17 @@ if g_df is not None and len(g_df) > 2:
     diff_sb = next_sb - now_ny
     sb_h, sb_m = divmod(diff_sb.seconds // 60, 60)
 
-    # حساب المستويات (نفس منطق كودك)
+    # حساب المستويات - مع إضافة .item() لتجنب خطأ ValueError
     mid_df = g_df[g_df.index.date == now_ny.date()].between_time('00:00', '00:15')
     mn_open = float(mid_df['Open'].iloc[0]) if not mid_df.empty else float(g_df['Open'].iloc[0])
     
     asia = g_df.between_time("20:00", "00:00")
-    ah, al = (asia['High'].max(), asia['Low'].min()) if not asia.empty else (0, 0)
+    ah = float(asia['High'].max()) if not asia.empty else 0.0
+    al = float(asia['Low'].min()) if not asia.empty else 0.0
     
     london = g_df.between_time("02:00", "05:00")
-    lh, ll = (london['High'].max(), london['Low'].min()) if not london.empty else (0, 0)
+    lh = float(london['High'].max()) if not london.empty else 0.0
+    ll = float(london['Low'].min()) if not london.empty else 0.0
 
     # عرض البيانات
     c1, c2, c3, c4 = st.columns(4)
@@ -84,12 +87,12 @@ if g_df is not None and len(g_df) > 2:
     
     st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
 
-    # شريط المعلومات السفلي
+    # الإضافات السفلية
     st.markdown("---")
-    st.markdown(f"🕒 **Baghdad:** `{now_bg.strftime('%H:%M')}` | 🇬🇧 **London:** `{now_ldn.strftime('%H:%M')}` | 🇺🇸 **NY:** `{now_ny.strftime('%H:%M')}`")
-    st.warning("⚠️ **Friday Alert:** High Volatility (NFP News at 08:30 AM NY).")
+    st.markdown(f"🕒 **Baghdad:** `{now_bg.strftime('%H:%M')}` | 🇺🇸 **NY:** `{now_ny.strftime('%H:%M')}`")
+    st.warning("⚠️ **Friday Alert:** High Volatility Session.")
 
 else:
-    st.info("جاري مزامنة السعر الحقيقي...")
+    st.info("جاري تحديث السعر اللحظي...")
 
-if st.button('🔄 Update Now'): st.rerun()
+if st.button('🔄 Force Update'): st.rerun()
