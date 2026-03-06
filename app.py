@@ -94,6 +94,10 @@ if g_df is not None and len(g_df) > 2:
     🌏 **Asia Range:** `{al:.2f} - {ah:.2f}` | 🇬🇧 **London Range:** `{ll:.2f} - {lh:.2f}`
     """)
 
+    # --- بداية الإضافات الخارجية (دون تعديل الكود أعلاه) ---
+    st.markdown("---")
+    st.warning("⚠️ **Friday Alert:** High Volatility Session (NFP/Jobs Report at 08:30 AM NY).")
+    
 else:
     st.info("جاري التحديث...")
 
